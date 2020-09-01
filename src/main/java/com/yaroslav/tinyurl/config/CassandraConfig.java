@@ -16,7 +16,7 @@ public class CassandraConfig {
     @Bean("cassandraSession")
     public CqlSession getCassandraSession() throws URISyntaxException {
         return CqlSession.builder()
-                .withCloudSecureConnectBundle(Paths.get(getClass().getResource("/secure-connect-yaroslavdb.zip").toURI()))
+                .withCloudSecureConnectBundle(getClass().getResourceAsStream("/secure-connect-yaroslavdb.zip"))
                 .withAuthCredentials("ygessen","AZSo5088")
                 .withKeyspace("clicks")
                 .build();
