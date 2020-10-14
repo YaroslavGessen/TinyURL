@@ -4,7 +4,6 @@ package com.yaroslav.tinyurl.json;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -13,10 +12,40 @@ import java.util.Objects;
  */
 @Document(collection = "users")
 public class User {
-
     @Id
-    private String _id;
+    private String id;
+    private String name;
+    private int allUrlClicks;
     private Map<String, ShortUrl> shorts;
+
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public User() {}
+
+    public User(String id, String name) {
+        this.id = id;
+        this.name = name;
+    }
+
+    public int getClicksAmount() {
+        return allUrlClicks;
+    }
+
+    public int incrementClicks() {
+        return incrementClicks(1);
+    }
+    public int incrementClicks(int value) {
+        return allUrlClicks += value;
+    }
+
+    public int decrementClicks() {
+        return decrementClicks(1);
+    }
+    public int decrementClicks(int value) {
+        return allUrlClicks -= value;
+    }
 
     public Map<String, ShortUrl> getShorts() {
         return shorts;
@@ -26,20 +55,24 @@ public class User {
         this.shorts = shorts;
     }
 
-    public String get_id() {
-        return _id;
+    public String getId() {
+        return id;
     }
 
-    public void set_id(String _id) {
-        this._id = _id;
+    public void setId(String id) {
+        this.id = id;
+    }
+
+    public String getName() {
+        return name;
     }
 
     @Override
     public String toString() {
         return "User{" +
-                "_id='" + _id + '\'' +
-                ", shorts=" + shorts +
-                '}';
+                "id='" + id + '\'' + ", " +
+                "name='" + name + '\'' + ", " +
+                "shorts=" + shorts + '}';
     }
 
     @Override
@@ -47,12 +80,12 @@ public class User {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         User user = (User) o;
-        return Objects.equals(_id, user._id) &&
+        return Objects.equals(id, user.id) &&
                 Objects.equals(shorts, user.shorts);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(_id, shorts);
+        return Objects.hash(id, shorts);
     }
 }

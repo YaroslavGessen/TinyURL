@@ -13,12 +13,17 @@ import java.util.Map;
 
 @Configuration
 public class CassandraConfig {
+    private static final String SECURE_CONNECT = "/secure-connect-yaroslavdb.zip";
+    private static final String USERNAME = "ygessen";
+    private static final String PASSWORD = "AZSo5088";
+    private static final String KEYSPACE = "clicks";
+
     @Bean("cassandraSession")
-    public CqlSession getCassandraSession() throws URISyntaxException {
+    public CqlSession getSession () {
         return CqlSession.builder()
-                .withCloudSecureConnectBundle(getClass().getResourceAsStream("/secure-connect-yaroslavdb.zip"))
-                .withAuthCredentials("ygessen","AZSo5088")
-                .withKeyspace("clicks")
+                .withCloudSecureConnectBundle(getClass().getResourceAsStream(SECURE_CONNECT))
+                .withAuthCredentials(USERNAME, PASSWORD)
+                .withKeyspace(KEYSPACE)
                 .build();
     }
 }

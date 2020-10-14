@@ -1,7 +1,10 @@
 package com.yaroslav.tinyurl;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.yaroslav.tinyurl.json.NewTinyRequest;
 import com.yaroslav.tinyurl.json.User;
+import com.yaroslav.tinyurl.json.UserClicks;
+import com.yaroslav.tinyurl.util.CassandraUtil;
 import com.yaroslav.tinyurl.util.RedisUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -11,8 +14,9 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.ModelAndView;
-import org.springframework.web.servlet.view.RedirectView;
-
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Random;
@@ -21,75 +25,103 @@ import java.util.Random;
 @RestController
 @RequestMapping(value = "")
 public class AppController {
-    public static final int MAX_RETIES = 3;
-    public static final int TINY_LENGTH = 6;
+    public static final int MAX_ATTEMPTS = 3;
+    private static final int TINY_LENGTH = 7;
+
+    @Autowired
+    private MongoTemplate mongoTemplate;
+    @Autowired
+    private RedisUtil redis;
+    @Autowired
+    private CassandraUtil cassandra;
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @Value("${app.baseurl}")
     String baseurl;
 
-    @Autowired
-    private MongoTemplate mongoTemplate;
+    private final Random random = new Random();
 
-    @Autowired
-    RedisUtil repository;
-    Random random = new Random();
-    @RequestMapping(value = "/app/tiny", method = RequestMethod.GET)
-    public String sayHello() {
-        return "Hello";
+    @RequestMapping(value = "/clicksSummary", method = RequestMethod.GET)
+    public List<UserClicks> getClicksSummary() {
+        return cassandra.getClicksSummary();
     }
 
-    @RequestMapping(value = "/app/user", method = RequestMethod.POST)
-    public String createUser(@RequestBody User user) {
-        mongoTemplate.insert(user,"users");;
+    @RequestMapping(value = "/allUsers", method = RequestMethod.GET)
+    public List<User> getAllUsers() {
+        return mongoTemplate.findAll(User.class, "users");
+    }
+
+    @RequestMapping(value = "/newUser", method = RequestMethod.POST)
+    public String createUser(@RequestParam String id, @RequestParam String name) {
+        User user = new User(id,name);
+        mongoTemplate.insert(user,"users");
+        cassandra.insertUserClicks(id, name);
+
         return "OK";
     }
-    @RequestMapping(value = "/{tiny}/", method = RequestMethod.GET)
-    public ModelAndView redirect(@PathVariable String tiny) {
-        String redirectTo = repository.get(tiny).toString();
-        Object usero = repository.get(tiny + ".user");
-        if (usero != null) {
-            String user = usero.toString();
-            Query query = Query.query(Criteria.where("_id").is(user));
-            Update update = new Update().inc("shorts."  + tiny + ".clicks.202008", 1);
-            mongoTemplate.updateFirst(query, update, "users");
-        }
-        System.out.println(redirectTo);
-        return new ModelAndView("redirect:" + redirectTo);
-    }
-    
-    @RequestMapping(value = "/app/tiny", method = RequestMethod.POST)
-    public String generateUrl(@RequestBody NewTinyRequest request) {
-        String longUrl = getValidLongUrl(request);
-        for (int i = 0; i < MAX_RETIES; i++) {
-            String candidate = generateTinyUrl();
-            if (repository.set(candidate, longUrl)) {
-                if (request.getUser() != null) {
-                    repository.set(candidate + ".user", request.getUser());
-                    Query query = Query.query(Criteria.where("_id").is(request.getUser()));
-                    Update update = new Update().set("shorts."  + candidate, new HashMap() );
+
+    @RequestMapping(value = "/newTinyUrl", method = RequestMethod.POST)
+    public String createTinyUrl(@RequestBody NewTinyRequest request) throws JsonProcessingException {
+        String result = "failed";
+        String tinyUrl, userId;
+        request.setLongUrl(addHttpsIfNotPresent(request.getLongUrl()));
+        userId = request.getUserId();
+        for (int i = 0; i < MAX_ATTEMPTS; i++) {
+            tinyUrl = generateTinyUrl();
+            if (redis.set(tinyUrl, objectMapper.writeValueAsString(request))) {
+                if (userId != null) {
+                    Query query = Query.query(Criteria.where("_id").is(userId));
+                    Update update = new Update().set("shorts."  + tinyUrl, new HashMap() );
                     mongoTemplate.updateFirst(query, update, "users");
                 }
-                return baseurl + candidate + "/";
+                result = baseurl + tinyUrl + "/";
+                break;
             }
-
         }
-        return "Error";
+
+        return result;
     }
 
-    private String getValidLongUrl(@RequestBody NewTinyRequest request) {
-        String longUrl = request.getUrl();
-        if (!longUrl.toLowerCase().startsWith("http")){
-            longUrl = "https://" + longUrl;
+    @RequestMapping(value = "/{tinyUri}/", method = RequestMethod.GET)
+    public ModelAndView redirect(@PathVariable String tinyUri) throws JsonProcessingException {
+        NewTinyRequest tinyRequest = objectMapper.readValue(
+                redis.get(tinyUri).toString(), NewTinyRequest.class);
+        String userId = tinyRequest.getUserId();
+        if ( userId != null) {
+            incrementMongoField(userId, "allUrlClicks");
+            incrementMongoField(userId,
+                    "shorts."  + tinyUri + ".clicks." + getCurMonth());
+            cassandra.incrementUserClicks(userId);
         }
-        return longUrl;
+
+        return new ModelAndView("redirect:" + tinyRequest.getLongUrl());
+    }
+
+    private void incrementMongoField(String id, String key){
+        Query query = Query.query(Criteria.where("_id").is(id));
+        Update update = new Update().inc(key, 1);
+        mongoTemplate.updateFirst(query, update, "users");
+    }
+
+    private String getCurMonth() {
+        SimpleDateFormat formatter = new SimpleDateFormat("yyyy/MM");
+        Date date = new Date();
+
+        return formatter.format(date);
+    }
+
+    private String addHttpsIfNotPresent(@RequestParam String longUrl) {
+        return  !longUrl.startsWith("http")? "https://" + longUrl: longUrl;
     }
 
     private String generateTinyUrl() {
-        String charpool = "ABCDEFHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-        String res = "";
+        String charPool = "ABCDEFHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        StringBuilder res = new StringBuilder();
         for (int i = 0; i < TINY_LENGTH; i++) {
-            res += charpool.charAt(random.nextInt(charpool.length()));
+            res.append(charPool.charAt(random.nextInt(charPool.length())));
         }
-        return res;
+
+        return res.toString();
     }
 }
