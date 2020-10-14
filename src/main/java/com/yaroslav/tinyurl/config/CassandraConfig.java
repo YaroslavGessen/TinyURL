@@ -17,7 +17,7 @@ public class CassandraConfig {
     public CqlSession getCassandraSession() throws URISyntaxException {
         return CqlSession.builder()
                 .withCloudSecureConnectBundle(getClass().getResourceAsStream("/secure-connect-yaroslavdb.zip"))
-                .withAuthCredentials("ygessen","AZSo5088")
+                .withAuthCredentials("ygessen","AZSo5088$")
                 .withKeyspace("clicks")
                 .build();
     }
